@@ -1,0 +1,9 @@
+.main-page {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    height: 25vh; /* Ocupa 10% da altura do viewport, e bota o texo pra baixo */
+    
+    text-align: center;
+
+}

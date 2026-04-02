@@ -1,0 +1,69 @@
+﻿@page "/"
+
+@using Microsoft.Maui.Devices
+@using Plugin.LocalNotification
+@using Plugin.LocalNotification.Core.Models
+@using Microsoft.Maui.ApplicationModel
+
+<div class="main-page">
+<h1>Chargit</h1>
+<h3>Never forget to charge your phone anymore!</h3>
+<p>Right now you are at: @batteryLevel</p>
+
+<button class="btn btn-primary" @onclick="LowNotification">
+    Test Notification
+</button>
+<p>@notificationStatus</p>
+</div>
+
+@code {
+    // Get the battery level and status using the Battery API
+    private double batteryLevel;
+    private string batteryStatus;
+
+    protected override void OnInitialized()
+    {
+        batteryLevel = Battery.Default.ChargeLevel;
+        batteryStatus = Battery.Default.State.ToString();
+
+        // Optional: Subscribe to changes so the UI updates automatically
+        Battery.Default.BatteryInfoChanged += OnBatteryChanged;
+    }
+
+    private void OnBatteryChanged(object sender, BatteryInfoChangedEventArgs e)
+    {
+        batteryLevel = e.ChargeLevel;
+        batteryStatus = e.State.ToString();
+        StateHasChanged(); // Refresh the UI
+    }
+
+    private string notificationStatus;
+
+    private async Task LowNotification()
+    {
+        try
+        {
+            // Build a simple immediate notification for testing (no schedule)
+            var request = new NotificationRequest
+            {
+                NotificationId = 1337,
+                Title = "Battery Low",
+                Description = "Your battery level is below 20%. Please charge your phone.",
+                ReturningData = "Dummy data"
+            };
+
+            // Ensure we invoke the plugin on the main thread
+            await MainThread.InvokeOnMainThreadAsync(() => LocalNotificationCenter.Current.Show(request));
+
+            notificationStatus = "Notification sent (attempted).";
+        }
+        catch (Exception ex)
+        {
+            // Capture and show the exception so you can see what went wrong
+            notificationStatus = $"Error sending notification: {ex.Message}";
+            Console.WriteLine(ex);
+        }
+
+        StateHasChanged();
+    }
+}
