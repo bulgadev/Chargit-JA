@@ -1,5 +1,7 @@
 ﻿using Microsoft.Extensions.Logging;
+using ChargitJA.Services;
 using Plugin.LocalNotification;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace ChargitJA
 {
@@ -17,13 +19,17 @@ namespace ChargitJA
                 });
 
             builder.Services.AddMauiBlazorWebView();
+			builder.Services.AddSingleton<BatteryService>();
 
 #if DEBUG
-    		builder.Services.AddBlazorWebViewDeveloperTools();
+			builder.Services.AddBlazorWebViewDeveloperTools();
     		builder.Logging.AddDebug();
 #endif
 
-            return builder.Build();
+            var app = builder.Build();
+            _ = app.Services.GetRequiredService<BatteryService>();
+
+            return app;
         }
     }
 }

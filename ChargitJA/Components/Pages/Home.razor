@@ -5,39 +5,82 @@
 @using Plugin.LocalNotification.Core.Models
 @using Microsoft.Maui.ApplicationModel
 
+@inject BatteryService BatteryService
+@inject NavigationManager NavigationManager
+@implements IDisposable
+
 <div class="main-page">
 <h1>Chargit</h1>
 <h3>Never forget to charge your phone anymore!</h3>
-<p>Right now you are at: @batteryLevel</p>
+<p>Right now you are at: @(BatteryService.BatteryLevel.ToString("P0"))</p>
+<p>Status: @BatteryService.BatteryStatus</p>
 
-<button class="btn btn-primary" @onclick="LowNotification">
-    Test Notification
-</button>
+<div class="mw-80">
+    <p>See all your devices, change their settings, and see their battery</p>
+    <div class="home-links">
+        <button type="button" class="btn btn-primary home-button" @onclick="GoToDevices">
+            Devices
+        </button>
+
+        <button type="button" class="btn btn-primary home-button" @onclick="GoToSettingsPage">
+            Settings
+        </button>
+    </div>
+
+    
+    <p class="pt-3">Change your devic settings, so you always are 100%!</p>
+    <button class="btn btn-primary home-button" @onclick="LowNotification">
+        Settings
+    </button>
+</div>
+
+@* <div class="card" style="width: 18rem;">
+    <div class="card-body">
+        <h5 class="card-title">Card title</h5>
+        <p class="card-text">Some quick example text to build on the card.</p>
+        <a href="#" class="btn btn-primary">Go somewhere</a>
+    </div>
+</div> *@
+
+<div class="mt-5; pt-5">
+    <button class="btn btn-primary" @onclick="LowNotification">
+        Test Notification
+    </button>
+
+</div>
+
 <p>@notificationStatus</p>
 </div>
 
 @code {
-    // Get the battery level and status using the Battery API
-    private double batteryLevel;
-    private string batteryStatus;
+
+
+    private string notificationStatus = string.Empty;
+    private System.ComponentModel.PropertyChangedEventHandler? batteryChangedHandler;
 
     protected override void OnInitialized()
     {
-        batteryLevel = Battery.Default.ChargeLevel;
-        batteryStatus = Battery.Default.State.ToString();
-
-        // Optional: Subscribe to changes so the UI updates automatically
-        Battery.Default.BatteryInfoChanged += OnBatteryChanged;
+        batteryChangedHandler = (_, _) => _ = InvokeAsync(StateHasChanged);
+        BatteryService.PropertyChanged += batteryChangedHandler;
     }
 
-    private void OnBatteryChanged(object sender, BatteryInfoChangedEventArgs e)
+    public void Dispose()
     {
-        batteryLevel = e.ChargeLevel;
-        batteryStatus = e.State.ToString();
-        StateHasChanged(); // Refresh the UI
+        if (batteryChangedHandler is not null)
+        {
+            BatteryService.PropertyChanged -= batteryChangedHandler;
+        }
     }
 
-    private string notificationStatus;
+    private void GoToDevices()
+    {
+        NavigationManager.NavigateTo("devices");
+    }
+
+    private void GoToSettingsPage()
+    {
+        NavigationManager.NavigateTo("settings");
+    }
 
     private async Task LowNotification()
     {

@@ -2,8 +2,22 @@
     display: flex;
     flex-direction: column;
     justify-content: center;
-    height: 25vh; /* Ocupa 10% da altura do viewport, e bota o texo pra baixo */
+    align-content: center;
     
     text-align: center;
 
+}
+
+.home-links {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    
+}
+
+.home-button {
+    display: inline-block;
+    width: 40vw; /* fixed width for the button */
+    margin: 0 auto; /* center horizontally */
 }

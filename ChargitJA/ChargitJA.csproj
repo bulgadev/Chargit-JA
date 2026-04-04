@@ -72,6 +72,7 @@
         <PackageReference Include="Microsoft.Extensions.Logging.Debug" Version="10.0.0" />
         <PackageReference Include="Plugin.LocalNotification" Version="14.1.0" />
         <PackageReference Include="Plugin.LocalNotification.Core" Version="1.1.0" />
+        <PackageReference Include="StackExchange.Redis" Version="2.8.41" />
     </ItemGroup>
 
 </Project>

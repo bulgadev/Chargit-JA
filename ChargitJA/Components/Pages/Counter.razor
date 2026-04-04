@@ -1,16 +1,37 @@
-﻿@page "/counter"
+﻿@page "/devices"
 
-<h1>Counter</h1>
+@using Microsoft.Maui.Devices
+@inject BatteryService BatteryService
+@implements IDisposable
 
-<p role="status">Current count: @currentCount</p>
+<div>
+    <h1>Your Devices</h1>
 
-<button class="btn btn-primary" @onclick="IncrementCount">Click me</button>
+    <div class="card text-bg-dark" style="width: 18rem;">
+        <div class="card-body">
+            <h5 class="card-title">@DeviceInfo.Current.Name</h5>
+            <p class="card-text">Battery: @BatteryService.BatteryLevel.ToString("P0")</p>
+            <p class="card-text">Status: @BatteryService.BatteryStatus</p>
+        </div>
+    </div>
+</div>
 
 @code {
-    private int currentCount = 0;
+    private System.ComponentModel.PropertyChangedEventHandler? batteryChangedHandler;
 
-    private void IncrementCount()
+    protected override void OnInitialized()
     {
-        currentCount++;
+        batteryChangedHandler = (_, _) => _ = InvokeAsync(StateHasChanged);
+        BatteryService.PropertyChanged += batteryChangedHandler;
+    }
+
+    public void Dispose()
+    {
+        if (batteryChangedHandler is not null)
+        {
+            BatteryService.PropertyChanged -= batteryChangedHandler;
+        }
     }
 }
+
+
