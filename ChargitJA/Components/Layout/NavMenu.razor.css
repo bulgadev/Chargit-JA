@@ -85,6 +85,39 @@
     display: none;
 }
 
+.nav-scrollable nav {
+    display: flex;
+    flex-direction: column;
+}
+
+.auth-actions {
+    margin-top: auto;
+    padding-bottom: 1rem;
+    border-top: 1px solid rgba(255,255,255,0.1);
+}
+
+.auth-user {
+    color: #d7d7d7;
+    font-size: 0.85rem;
+    margin-top: 0.75rem;
+    margin-bottom: 0.5rem;
+}
+
+.auth-button {
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    color: #d7d7d7;
+    border-radius: 4px;
+    height: 3rem;
+}
+
+.auth-button:hover {
+    background-color: rgba(255,255,255,0.1);
+    color: white;
+}
+
 .navbar-toggler:checked ~ .nav-scrollable {
     display: block;
 }
@@ -101,5 +134,9 @@
         /* Allow sidebar to scroll for tall menus */
         height: calc(100vh - 3.5rem);
         overflow-y: auto;
+    }
+
+    .nav-scrollable nav {
+        min-height: calc(100vh - 3.5rem);
     }
 }

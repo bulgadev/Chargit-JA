@@ -1,4 +1,8 @@
-﻿<div class="top-row ps-3 navbar navbar-dark">
+﻿@inject AuthService AuthService
+@inject UserSessions UserSessions
+@implements IDisposable
+
+<div class="top-row ps-3 navbar navbar-dark">
     <div class="container-fluid">
         <a class="navbar-brand" href="">ChargitJA</a>
     </div>
@@ -8,6 +12,7 @@
 
 <div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
     <nav class="nav flex-column">
+        <div>
         <div class="nav-item px-3">
             <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
                 <span class="bi bi-house-door-fill-nav-menu" aria-hidden="true"></span> Home
@@ -23,5 +28,51 @@
                 <span class="bi bi-list-nested-nav-menu" aria-hidden="true"></span> Settings
             </NavLink>
         </div>
+        </div>
+
+        <div class="auth-actions px-3">
+            @if (UserSessions.IsAuthenticated)
+            {
+                <div class="nav-item auth-user">@UserSessions.Username</div>
+                <button type="button" class="nav-link auth-button" @onclick="LogoutAsync">Logout</button>
+            }
+            else
+            {
+                <button type="button" class="nav-link auth-button" @onclick="LoginAsync">Login</button>
+                <button type="button" class="nav-link auth-button" @onclick="RegisterAsync">Register</button>
+            }
+        </div>
     </nav>
 </div>
+
+@code {
+    protected override void OnInitialized()
+    {
+        UserSessions.PropertyChanged += OnSessionChanged;
+    }
+
+    private void OnSessionChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
+    {
+        _ = InvokeAsync(StateHasChanged);
+    }
+
+    private async Task LoginAsync()
+    {
+        await AuthService.LoginAsync();
+    }
+
+    private async Task RegisterAsync()
+    {
+        await AuthService.RegisterAsync();
+    }
+
+    private async Task LogoutAsync()
+    {
+        await AuthService.LogoutAsync();
+    }
+
+    public void Dispose()
+    {
+        UserSessions.PropertyChanged -= OnSessionChanged;
+    }
+}
