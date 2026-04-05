@@ -2,4 +2,37 @@
 
 <h1>Settings</h1>
 
-<p>Configure your battery notifications and app preferences here.</p>
+<p>Bedtime for this device:</p>
+<input type="time" @bind="bedtime" class="form-control w-auto" />
+
+<p>Minimum battery to alarm (Just execute an alarm, when your phone are below this percentage of battery)</p>
+<input type="number" @bind="minBattery" class="form-control w-auto" />
+
+<button class="btn btn-primary mt-3" @onclick="SaveSettings">
+Save Settings
+</button>
+
+@code {
+
+	private int minBattery;
+	private TimeOnly? bedtime;
+
+	// Format inputs, to make a json
+
+	public class Settings {
+		public int minBatteryJ { get; set; }
+		public TimeOnly? bedtimeJ { get; set; }
+	};
+
+	private void SaveSettings() {
+		var settings = new Settings {
+			minBatteryJ = minBattery,
+			bedtimeJ = bedtime
+		};
+		var json = System.Text.Json.JsonSerializer.Serialize(settings);
+		System.IO.File.WriteAllText("settings.json", json);
+	}
+		
+
+
+}
