@@ -30,7 +30,9 @@ Save Settings
 			bedtimeJ = bedtime
 		};
 		var json = System.Text.Json.JsonSerializer.Serialize(settings);
-		System.IO.File.WriteAllText("settings.json", json);
+		string targetFile = Path.Combine(FileSystem.AppDataDirectory, "settings.json");
+    
+		System.IO.File.WriteAllText(targetFile, json);
 	}
 		
 

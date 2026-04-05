@@ -1,16 +1,19 @@
-﻿using System.ComponentModel;
-using System.Runtime.CompilerServices;
-using System.Text.Json;
-using Microsoft.Extensions.Logging;
+﻿using Microsoft.Extensions.Logging;
 using Microsoft.Maui.Devices;
+
 using StackExchange.Redis;
+using System.ComponentModel;
+using System.Runtime.CompilerServices;
+using System.Security.Cryptography.X509Certificates;
+using System.Text.Json;
 
 namespace ChargitJA.Services;
 
 internal sealed class BatteryService : INotifyPropertyChanged, IDisposable
 {
-  private static readonly TimeOnly ScheduledAlarmTime = new(22, 0);
-	private const int MinimumAlarmBatteryPercentage = 80;
+  private static TimeOnly ScheduledAlarmTime;
+	UserSettings? currentSettings;
+	private int MinimumAlarmBatteryPercentage;
 	private const string RedisConnectionString = "192.168.100.86:6379";
 	private const string GuestUsername = "bulga";
 	private const string GuestEmail = "guest@example.com";
@@ -53,6 +56,12 @@ internal sealed class BatteryService : INotifyPropertyChanged, IDisposable
 		Battery.Default.BatteryInfoChanged += OnBatteryInfoChanged;
        _userSessions.PropertyChanged += OnUserSessionChanged;
 		_alarmCheckTimer = new Timer(_ => CheckAndTriggerAlarm(), null, TimeSpan.Zero, TimeSpan.FromMinutes(1));
+
+		currentSettings = GetSettings();
+		MinimumAlarmBatteryPercentage = currentSettings?.minBattery ?? 20;
+		ScheduledAlarmTime = currentSettings is not null
+			? TimeOnly.FromTimeSpan(TimeSpan.FromHours(currentSettings.bedtime.Hour) + TimeSpan.FromMinutes(currentSettings.bedtime.Minute))
+			: new TimeOnly(22, 0);
 	}
 
 	public double BatteryLevel
@@ -102,6 +111,26 @@ internal sealed class BatteryService : INotifyPropertyChanged, IDisposable
 		{
 			UpdateBatteryInfo(pushToRedis: true);
 		}
+	}
+
+	private class UserSettings
+	{
+		public TimeOnly bedtime { get; set; }
+		public int minBattery { get; set; }
+	}
+
+	private UserSettings? GetSettings()
+	{
+		// Read the json, and get the settings for the user, if they exist, otherwise use defaults
+		string jsonString = File.ReadAllText("Settings.json");
+
+		UserSettings? settings = JsonSerializer.Deserialize<UserSettings>(jsonString);
+
+		if (settings != null) {
+			return settings;
+		}
+
+		return null;
 	}
 
 	private void CheckAndTriggerAlarm(bool forceAlarm = false)
