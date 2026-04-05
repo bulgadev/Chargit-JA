@@ -47,12 +47,25 @@
         Test Notification
     </button>
 
+    @if (ShowDebugAlarmButton)
+    {
+        <button class="btn btn-primary ms-2" @onclick="TriggerAlarmCheck">
+            Test Alarm Check
+        </button>
+    }
+
 </div>
 
 <p>@notificationStatus</p>
 </div>
 
 @code {
+
+#if DEBUG
+    private const bool ShowDebugAlarmButton = true;
+#else
+    private const bool ShowDebugAlarmButton = false;
+#endif
 
 
     private string notificationStatus = string.Empty;
@@ -108,5 +121,12 @@
         }
 
         StateHasChanged();
+    }
+
+    private Task TriggerAlarmCheck()
+    {
+        BatteryService.TriggerAlarmCheckForDebug();
+        notificationStatus = "Alarm check triggered.";
+        return Task.CompletedTask;
     }
 }

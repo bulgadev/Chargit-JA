@@ -9,7 +9,9 @@ namespace ChargitJA.Services;
 
 internal sealed class BatteryService : INotifyPropertyChanged, IDisposable
 {
-   private const string RedisConnectionString = "192.168.100.86:6379";
+  private static readonly TimeOnly ScheduledAlarmTime = new(22, 0);
+	private const int MinimumAlarmBatteryPercentage = 80;
+	private const string RedisConnectionString = "192.168.100.86:6379";
 	private const string GuestUsername = "bulga";
 	private const string GuestEmail = "guest@example.com";
 	private const string GuestUserId = "0";
@@ -19,12 +21,15 @@ internal sealed class BatteryService : INotifyPropertyChanged, IDisposable
 	private readonly ConnectionMultiplexer _redisConnection;
 	private readonly IDatabase _database;
 	private readonly string _deviceName;
-  private readonly string _deviceId;
+    private readonly string _deviceId;
 	private readonly string _createdAt;
+  private readonly Timer _alarmCheckTimer;
 	private int _lastPushedBatteryPercentage = -1;
+	private DateOnly? _lastAlarmDate;
 
 	private double _batteryLevel;
 	private string _batteryStatus = string.Empty;
+	private IReadOnlyList<UserDevice> _devices = Array.Empty<UserDevice>();
 
  public BatteryService(ILogger<BatteryService> logger, UserSessions userSessions)
 	{
@@ -47,6 +52,7 @@ internal sealed class BatteryService : INotifyPropertyChanged, IDisposable
 		UpdateBatteryInfo(pushToRedis: true);
 		Battery.Default.BatteryInfoChanged += OnBatteryInfoChanged;
        _userSessions.PropertyChanged += OnUserSessionChanged;
+		_alarmCheckTimer = new Timer(_ => CheckAndTriggerAlarm(), null, TimeSpan.Zero, TimeSpan.FromMinutes(1));
 	}
 
 	public double BatteryLevel
@@ -61,13 +67,25 @@ internal sealed class BatteryService : INotifyPropertyChanged, IDisposable
 		private set => SetProperty(ref _batteryStatus, value);
 	}
 
+	public IReadOnlyList<UserDevice> Devices
+	{
+		get => _devices;
+		private set => SetProperty(ref _devices, value);
+	}
+
 	public event PropertyChangedEventHandler? PropertyChanged;
 
 	public void Dispose()
 	{
 		Battery.Default.BatteryInfoChanged -= OnBatteryInfoChanged;
        _userSessions.PropertyChanged -= OnUserSessionChanged;
-      _redisConnection.Dispose();
+		_alarmCheckTimer.Dispose();
+		_redisConnection.Dispose();
+	}
+
+	public void TriggerAlarmCheckForDebug()
+	{
+		CheckAndTriggerAlarm(forceAlarm: true);
 	}
 
 	private void OnBatteryInfoChanged(object? sender, BatteryInfoChangedEventArgs e)
@@ -86,6 +104,43 @@ internal sealed class BatteryService : INotifyPropertyChanged, IDisposable
 		}
 	}
 
+	private void CheckAndTriggerAlarm(bool forceAlarm = false)
+	{
+		UpdateBatteryInfo();
+
+		var now = DateTime.Now;
+		if (!forceAlarm)
+		{
+			if (now.Hour != ScheduledAlarmTime.Hour || now.Minute != ScheduledAlarmTime.Minute)
+			{
+				return;
+			}
+
+			var currentDate = DateOnly.FromDateTime(now);
+			if (_lastAlarmDate == currentDate)
+			{
+				return;
+			}
+		}
+
+		var batteryPercentage = (int)Math.Round(BatteryLevel * 100, MidpointRounding.AwayFromZero);
+		if (batteryPercentage >= MinimumAlarmBatteryPercentage)
+		{
+			return;
+		}
+
+		var alarmTime = forceAlarm
+			? DateTime.Now.AddSeconds(2)
+			: now.Date + ScheduledAlarmTime.ToTimeSpan();
+
+		AlarmInterface.SetAlarm(alarmTime, $"Your {_deviceName} is not charging!");
+
+		if (!forceAlarm)
+		{
+			_lastAlarmDate = DateOnly.FromDateTime(now);
+		}
+	}
+
     private void UpdateBatteryInfo(bool pushToRedis = false)
 	{
 		BatteryLevel = Battery.Default.ChargeLevel;
@@ -96,17 +151,19 @@ internal sealed class BatteryService : INotifyPropertyChanged, IDisposable
 		{
 			PushBatteryToRedis(batteryPercentage);
 		}
+
+		LoadDevicesFromRedis();
 	}
 
-	private void PushBatteryToRedis(int batteryPercentage)
+  private void PushBatteryToRedis(int batteryPercentage)
 	{
-       EnsureUserDocumentExists();
+      EnsureUserDocumentExists();
 
-		var nowUtc = DateTime.UtcNow.ToString("O");
-      var devicePath = $"$.devices[?(@.id=='{_deviceId}')]";
+     var nowUtc = DateTime.UtcNow.ToString("O");
+		var devicePath = $"$.devices[?(@.id=='{_deviceId}')]";
 		var existingDevice = _database.Execute("JSON.GET", RedisKey, devicePath).ToString();
 
-		if (string.IsNullOrWhiteSpace(existingDevice) || existingDevice == "[]")
+        if (string.IsNullOrWhiteSpace(existingDevice) || existingDevice == "[]")
 		{
             var devicePayload = JsonSerializer.Serialize(new
 			{
@@ -121,7 +178,7 @@ internal sealed class BatteryService : INotifyPropertyChanged, IDisposable
 		}
 		else
 		{
-            _database.Execute("JSON.SET", RedisKey, $"{devicePath}.name", JsonSerializer.Serialize(_deviceName));
+           _database.Execute("JSON.SET", RedisKey, $"{devicePath}.name", JsonSerializer.Serialize(_deviceName));
 			_database.Execute("JSON.SET", RedisKey, $"{devicePath}.battery", JsonSerializer.Serialize(batteryPercentage));
 			_database.Execute("JSON.SET", RedisKey, $"{devicePath}.status", JsonSerializer.Serialize(BatteryStatus));
 			_database.Execute("JSON.SET", RedisKey, $"{devicePath}.last_sync", JsonSerializer.Serialize(nowUtc));
@@ -131,6 +188,58 @@ internal sealed class BatteryService : INotifyPropertyChanged, IDisposable
 		_logger.LogDebug("Battery level synced to Redis: {BatteryPercentage}%", batteryPercentage);
 	}
 
+	private void LoadDevicesFromRedis()
+	{
+		EnsureUserDocumentExists();
+
+		var json = _database.Execute("JSON.GET", RedisKey, "$.devices").ToString();
+		if (string.IsNullOrWhiteSpace(json) || json == "[]")
+		{
+			Devices = Array.Empty<UserDevice>();
+			return;
+		}
+
+		try
+		{
+			using var document = JsonDocument.Parse(json);
+			var devicesElement = GetDevicesElement(document.RootElement);
+			if (devicesElement is null || devicesElement.Value.ValueKind is not JsonValueKind.Array)
+			{
+				Devices = Array.Empty<UserDevice>();
+				return;
+			}
+
+			var devices = new List<UserDevice>();
+			foreach (var device in devicesElement.Value.EnumerateArray())
+			{
+				if (device.ValueKind is not JsonValueKind.Object)
+				{
+					continue;
+				}
+
+				var id = TryGetString(device, "id") ?? string.Empty;
+				var name = TryGetString(device, "name") ?? string.Empty;
+				var status = TryGetString(device, "status") ?? string.Empty;
+				var lastSync = TryGetString(device, "last_sync");
+				var battery = TryGetInt(device, "battery");
+
+				if (string.IsNullOrWhiteSpace(id) && string.IsNullOrWhiteSpace(name))
+				{
+					continue;
+				}
+
+				devices.Add(new UserDevice(id, name, battery, status, lastSync));
+			}
+
+			Devices = devices;
+		}
+		catch (JsonException exception)
+		{
+			_logger.LogWarning(exception, "Could not parse devices JSON from Redis for key {RedisKey}.", RedisKey);
+			Devices = Array.Empty<UserDevice>();
+		}
+	}
+
 	private void EnsureUserDocumentExists()
 	{
       var username = GetSessionUsername();
@@ -138,9 +247,9 @@ internal sealed class BatteryService : INotifyPropertyChanged, IDisposable
 		var userId = GetSessionUserId();
 		var redisKey = $"user:{username}";
 
-      if (_database.KeyExists(redisKey))
+        if (_database.KeyExists(redisKey))
 		{
-           _database.Execute("JSON.SET", redisKey, "$.user_info.username", JsonSerializer.Serialize(username));
+         _database.Execute("JSON.SET", redisKey, "$.user_info.username", JsonSerializer.Serialize(username));
 			_database.Execute("JSON.SET", redisKey, "$.user_info.email", JsonSerializer.Serialize(email));
 			_database.Execute("JSON.SET", redisKey, "$.user_info.id", JsonSerializer.Serialize(userId));
 			return;
@@ -153,7 +262,7 @@ internal sealed class BatteryService : INotifyPropertyChanged, IDisposable
                 username = username,
 				email = email,
 				created_at = _createdAt,
-             id = userId
+                id = userId
 			},
 			devices = Array.Empty<object>(),
 			settings = new
@@ -177,6 +286,74 @@ internal sealed class BatteryService : INotifyPropertyChanged, IDisposable
 	private string GetSessionUserId() =>
 		string.IsNullOrWhiteSpace(_userSessions.UserId) ? GuestUserId : _userSessions.UserId;
 
+	private static JsonElement? GetDevicesElement(JsonElement root)
+	{
+		if (root.ValueKind is JsonValueKind.Array)
+		{
+			if (root.GetArrayLength() is 0)
+			{
+				return null;
+			}
+
+			var first = root[0];
+			if (first.ValueKind is JsonValueKind.Array)
+			{
+				return first;
+			}
+
+			if (first.ValueKind is JsonValueKind.Object && first.TryGetProperty("devices", out var nestedDevices))
+			{
+				return nestedDevices;
+			}
+
+			return root;
+		}
+
+		if (root.ValueKind is JsonValueKind.Object && root.TryGetProperty("devices", out var devices))
+		{
+			return devices;
+		}
+
+		return null;
+	}
+
+	private static string? TryGetString(JsonElement element, string propertyName)
+	{
+		if (!element.TryGetProperty(propertyName, out var value))
+		{
+			return null;
+		}
+
+		return value.ValueKind switch
+		{
+			JsonValueKind.String => value.GetString(),
+			JsonValueKind.Number => value.GetRawText(),
+			JsonValueKind.True => bool.TrueString,
+			JsonValueKind.False => bool.FalseString,
+			_ => null
+		};
+	}
+
+	private static int TryGetInt(JsonElement element, string propertyName)
+	{
+		if (!element.TryGetProperty(propertyName, out var value))
+		{
+			return 0;
+		}
+
+		if (value.ValueKind is JsonValueKind.Number && value.TryGetInt32(out var intValue))
+		{
+			return intValue;
+		}
+
+		if (value.ValueKind is JsonValueKind.String && int.TryParse(value.GetString(), out var parsedValue))
+		{
+			return parsedValue;
+		}
+
+		return 0;
+	}
+
 	private void SetProperty<T>(ref T storage, T value, [CallerMemberName] string? propertyName = null)
 	{
 		if (Equals(storage, value))
@@ -188,3 +365,5 @@ internal sealed class BatteryService : INotifyPropertyChanged, IDisposable
 		PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
 	}
 }
+
+internal sealed record UserDevice(string Id, string Name, int Battery, string Status, string? LastSync);

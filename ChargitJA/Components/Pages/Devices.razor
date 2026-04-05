@@ -1,19 +1,28 @@
 ﻿@page "/devices"
 
-@using Microsoft.Maui.Devices
 @inject BatteryService BatteryService
 @implements IDisposable
 
 <div>
     <h1>Your Devices</h1>
 
-    <div class="card text-bg-dark" style="width: 18rem;">
-        <div class="card-body">
-            <h5 class="card-title">@DeviceInfo.Current.Name</h5>
-            <p class="card-text">Battery: @BatteryService.BatteryLevel.ToString("P0")</p>
-            <p class="card-text">Status: @BatteryService.BatteryStatus</p>
-        </div>
-    </div>
+    @if (BatteryService.Devices.Count == 0)
+    {
+        <p>No devices found for this user.</p>
+    }
+    else
+    {
+        @foreach (var device in BatteryService.Devices)
+        {
+            <div class="card text-bg-dark mb-3" style="width: 18rem;">
+                <div class="card-body">
+                    <h5 class="card-title">@device.Name</h5>
+                    <p class="card-text">Battery: @device.Battery%</p>
+                    <p class="card-text">Status: @device.Status</p>
+                </div>
+            </div>
+        }
+    }
 </div>
 
 @code {
