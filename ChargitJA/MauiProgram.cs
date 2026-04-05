@@ -2,6 +2,7 @@
 using ChargitJA.Services;
 using Plugin.LocalNotification;
 using Microsoft.Extensions.DependencyInjection;
+using System.Net.Http;
 
 namespace ChargitJA
 {
@@ -19,6 +20,9 @@ namespace ChargitJA
                 });
 
             builder.Services.AddMauiBlazorWebView();
+            builder.Services.AddSingleton<HttpClient>();
+            builder.Services.AddSingleton<UserSessions>();
+            builder.Services.AddSingleton<AuthService>();
 			builder.Services.AddSingleton<BatteryService>();
 
 #if DEBUG
@@ -27,6 +31,7 @@ namespace ChargitJA
 #endif
 
             var app = builder.Build();
+            _ = app.Services.GetRequiredService<AuthService>().InitializeAsync();
             _ = app.Services.GetRequiredService<BatteryService>();
 
             return app;

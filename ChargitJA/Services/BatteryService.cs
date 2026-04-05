@@ -9,13 +9,13 @@ namespace ChargitJA.Services;
 
 internal sealed class BatteryService : INotifyPropertyChanged, IDisposable
 {
-  private const string RedisConnectionString = "192.168.100.86:6379";
-	private string RedisKey => $"user:{Username}";
-	private const string Username = "bulga";
-   private const string Email = "marcelo@example.com";
-	private const int UserId = 1;
+   private const string RedisConnectionString = "192.168.100.86:6379";
+	private const string GuestUsername = "bulga";
+	private const string GuestEmail = "guest@example.com";
+	private const string GuestUserId = "0";
 
 	private readonly ILogger<BatteryService> _logger;
+    private readonly UserSessions _userSessions;
 	private readonly ConnectionMultiplexer _redisConnection;
 	private readonly IDatabase _database;
 	private readonly string _deviceName;
@@ -26,9 +26,10 @@ internal sealed class BatteryService : INotifyPropertyChanged, IDisposable
 	private double _batteryLevel;
 	private string _batteryStatus = string.Empty;
 
-  public BatteryService(ILogger<BatteryService> logger)
+ public BatteryService(ILogger<BatteryService> logger, UserSessions userSessions)
 	{
         _logger = logger;
+      _userSessions = userSessions;
 		_deviceName = DeviceInfo.Current.Name;
 		var normalizedDeviceId = new string(_deviceName
 			.ToLowerInvariant()
@@ -45,6 +46,7 @@ internal sealed class BatteryService : INotifyPropertyChanged, IDisposable
 
 		UpdateBatteryInfo(pushToRedis: true);
 		Battery.Default.BatteryInfoChanged += OnBatteryInfoChanged;
+       _userSessions.PropertyChanged += OnUserSessionChanged;
 	}
 
 	public double BatteryLevel
@@ -64,12 +66,24 @@ internal sealed class BatteryService : INotifyPropertyChanged, IDisposable
 	public void Dispose()
 	{
 		Battery.Default.BatteryInfoChanged -= OnBatteryInfoChanged;
+       _userSessions.PropertyChanged -= OnUserSessionChanged;
       _redisConnection.Dispose();
 	}
 
 	private void OnBatteryInfoChanged(object? sender, BatteryInfoChangedEventArgs e)
 	{
         UpdateBatteryInfo();
+	}
+
+	private void OnUserSessionChanged(object? sender, PropertyChangedEventArgs e)
+	{
+		if (e.PropertyName is nameof(UserSessions.IsAuthenticated)
+			or nameof(UserSessions.Username)
+			or nameof(UserSessions.Email)
+			or nameof(UserSessions.UserId))
+		{
+			UpdateBatteryInfo(pushToRedis: true);
+		}
 	}
 
     private void UpdateBatteryInfo(bool pushToRedis = false)
@@ -119,8 +133,16 @@ internal sealed class BatteryService : INotifyPropertyChanged, IDisposable
 
 	private void EnsureUserDocumentExists()
 	{
-		if (_database.KeyExists(RedisKey))
+      var username = GetSessionUsername();
+		var email = GetSessionEmail();
+		var userId = GetSessionUserId();
+		var redisKey = $"user:{username}";
+
+      if (_database.KeyExists(redisKey))
 		{
+           _database.Execute("JSON.SET", redisKey, "$.user_info.username", JsonSerializer.Serialize(username));
+			_database.Execute("JSON.SET", redisKey, "$.user_info.email", JsonSerializer.Serialize(email));
+			_database.Execute("JSON.SET", redisKey, "$.user_info.id", JsonSerializer.Serialize(userId));
 			return;
 		}
 
@@ -128,10 +150,10 @@ internal sealed class BatteryService : INotifyPropertyChanged, IDisposable
 		{
 			user_info = new
 			{
-				username = Username,
-				email = Email,
+                username = username,
+				email = email,
 				created_at = _createdAt,
-				id = UserId
+             id = userId
 			},
 			devices = Array.Empty<object>(),
 			settings = new
@@ -141,8 +163,19 @@ internal sealed class BatteryService : INotifyPropertyChanged, IDisposable
 			}
 		});
 
-		_database.Execute("JSON.SET", RedisKey, "$", payload, "NX");
+        _database.Execute("JSON.SET", redisKey, "$", payload, "NX");
 	}
+
+	private string RedisKey => $"user:{GetSessionUsername()}";
+
+	private string GetSessionUsername() =>
+		string.IsNullOrWhiteSpace(_userSessions.Username) ? GuestUsername : _userSessions.Username;
+
+	private string GetSessionEmail() =>
+		string.IsNullOrWhiteSpace(_userSessions.Email) ? GuestEmail : _userSessions.Email;
+
+	private string GetSessionUserId() =>
+		string.IsNullOrWhiteSpace(_userSessions.UserId) ? GuestUserId : _userSessions.UserId;
 
 	private void SetProperty<T>(ref T storage, T value, [CallerMemberName] string? propertyName = null)
 	{
