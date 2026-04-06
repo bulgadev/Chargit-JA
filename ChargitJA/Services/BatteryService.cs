@@ -1,10 +1,10 @@
 ﻿using Microsoft.Extensions.Logging;
 using Microsoft.Maui.Devices;
+using Microsoft.Maui.Storage;
 
 using StackExchange.Redis;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
-using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 
 namespace ChargitJA.Services;
@@ -14,15 +14,16 @@ internal sealed class BatteryService : INotifyPropertyChanged, IDisposable
   private static TimeOnly ScheduledAlarmTime;
 	UserSettings? currentSettings;
 	private int MinimumAlarmBatteryPercentage;
-	private const string RedisConnectionString = "192.168.100.86:6379";
+	private const string RedisConnectionString = "192.168.0.133:6379";
 	private const string GuestUsername = "bulga";
 	private const string GuestEmail = "guest@example.com";
 	private const string GuestUserId = "0";
+	private const string SettingsFileName = "settings.json";
 
 	private readonly ILogger<BatteryService> _logger;
     private readonly UserSessions _userSessions;
-	private readonly ConnectionMultiplexer _redisConnection;
-	private readonly IDatabase _database;
+    private readonly ConnectionMultiplexer? _redisConnection;
+	private readonly IDatabase? _database;
 	private readonly string _deviceName;
     private readonly string _deviceId;
 	private readonly string _createdAt;
@@ -47,10 +48,23 @@ internal sealed class BatteryService : INotifyPropertyChanged, IDisposable
 		_deviceId = $"{normalizedDeviceId}_id";
 		_createdAt = DateTime.UtcNow.ToString("yyyy-MM-dd");
 
-		var configurationOptions = ConfigurationOptions.Parse(RedisConnectionString);
-		configurationOptions.AbortOnConnectFail = false;
-		_redisConnection = ConnectionMultiplexer.Connect(configurationOptions);
-		_database = _redisConnection.GetDatabase();
+       try
+		{
+			var configurationOptions = ConfigurationOptions.Parse(RedisConnectionString);
+			configurationOptions.AbortOnConnectFail = false;
+			configurationOptions.ConnectTimeout = 1000;
+			configurationOptions.SyncTimeout = 1000;
+			_redisConnection = ConnectionMultiplexer.Connect(configurationOptions);
+			_database = _redisConnection.GetDatabase();
+		}
+		catch (RedisConnectionException exception)
+		{
+			_logger.LogWarning(exception, "Redis is not reachable at startup. Battery sync will run locally only.");
+		}
+		catch (Exception exception)
+		{
+			_logger.LogWarning(exception, "Redis initialization failed. Battery sync will run locally only.");
+		}
 
 		UpdateBatteryInfo(pushToRedis: true);
 		Battery.Default.BatteryInfoChanged += OnBatteryInfoChanged;
@@ -58,10 +72,8 @@ internal sealed class BatteryService : INotifyPropertyChanged, IDisposable
 		_alarmCheckTimer = new Timer(_ => CheckAndTriggerAlarm(), null, TimeSpan.Zero, TimeSpan.FromMinutes(1));
 
 		currentSettings = GetSettings();
-		MinimumAlarmBatteryPercentage = currentSettings?.minBattery ?? 20;
-		ScheduledAlarmTime = currentSettings is not null
-			? TimeOnly.FromTimeSpan(TimeSpan.FromHours(currentSettings.bedtime.Hour) + TimeSpan.FromMinutes(currentSettings.bedtime.Minute))
-			: new TimeOnly(22, 0);
+      MinimumAlarmBatteryPercentage = GetConfiguredMinimumBatteryPercentage();
+		ScheduledAlarmTime = GetConfiguredAlarmTime(currentSettings);
 	}
 
 	public double BatteryLevel
@@ -89,7 +101,7 @@ internal sealed class BatteryService : INotifyPropertyChanged, IDisposable
 		Battery.Default.BatteryInfoChanged -= OnBatteryInfoChanged;
        _userSessions.PropertyChanged -= OnUserSessionChanged;
 		_alarmCheckTimer.Dispose();
-		_redisConnection.Dispose();
+     _redisConnection?.Dispose();
 	}
 
 	public void TriggerAlarmCheckForDebug()
@@ -115,28 +127,41 @@ internal sealed class BatteryService : INotifyPropertyChanged, IDisposable
 
 	private class UserSettings
 	{
-		public TimeOnly bedtime { get; set; }
-		public int minBattery { get; set; }
+       public TimeOnly? bedtime { get; set; }
+		public int? minBattery { get; set; }
+		public TimeOnly? bedtimeJ { get; set; }
+		public int? minBatteryJ { get; set; }
 	}
 
 	private UserSettings? GetSettings()
 	{
-		// Read the json, and get the settings for the user, if they exist, otherwise use defaults
-		string jsonString = File.ReadAllText("Settings.json");
-
-		UserSettings? settings = JsonSerializer.Deserialize<UserSettings>(jsonString);
-
-		if (settings != null) {
-			return settings;
+      var settingsPath = Path.Combine(FileSystem.AppDataDirectory, SettingsFileName);
+		if (!File.Exists(settingsPath))
+		{
+			return null;
 		}
 
-		return null;
+		try
+		{
+			var jsonString = File.ReadAllText(settingsPath);
+			if (string.IsNullOrWhiteSpace(jsonString))
+			{
+				return null;
+			}
+
+			return JsonSerializer.Deserialize<UserSettings>(jsonString);
+		}
+		catch (Exception exception) when (exception is JsonException or IOException)
+		{
+			_logger.LogWarning(exception, "Failed to read settings from {SettingsPath}. Using defaults.", settingsPath);
+			return null;
+		}
 	}
 
 	private void CheckAndTriggerAlarm(bool forceAlarm = false)
 	{
 		UpdateBatteryInfo();
-
+		 
 		var now = DateTime.Now;
 		if (!forceAlarm)
 		{
@@ -175,13 +200,27 @@ internal sealed class BatteryService : INotifyPropertyChanged, IDisposable
 		BatteryLevel = Battery.Default.ChargeLevel;
 		BatteryStatus = Battery.Default.State.ToString();
 
-		var batteryPercentage = (int)Math.Round(BatteryLevel * 100, MidpointRounding.AwayFromZero);
-		if (pushToRedis || _lastPushedBatteryPercentage == -1 || batteryPercentage < _lastPushedBatteryPercentage)
+		if (_database is null)
 		{
-			PushBatteryToRedis(batteryPercentage);
+			Devices = Array.Empty<UserDevice>();
+			return;
 		}
 
-		LoadDevicesFromRedis();
+		var batteryPercentage = (int)Math.Round(BatteryLevel * 100, MidpointRounding.AwayFromZero);
+      try
+		{
+          if (pushToRedis || _lastPushedBatteryPercentage == -1 || batteryPercentage < _lastPushedBatteryPercentage)
+			{
+				PushBatteryToRedis(batteryPercentage);
+			}
+
+			LoadDevicesFromRedis();
+		}
+		catch (RedisException exception)
+		{
+			_logger.LogWarning(exception, "Redis operation failed while updating battery info.");
+			Devices = Array.Empty<UserDevice>();
+		}
 	}
 
   private void PushBatteryToRedis(int batteryPercentage)
@@ -271,6 +310,11 @@ internal sealed class BatteryService : INotifyPropertyChanged, IDisposable
 
 	private void EnsureUserDocumentExists()
 	{
+      if (_database is null)
+		{
+			return;
+		}
+
       var username = GetSessionUsername();
 		var email = GetSessionEmail();
 		var userId = GetSessionUserId();
@@ -305,6 +349,15 @@ internal sealed class BatteryService : INotifyPropertyChanged, IDisposable
 	}
 
 	private string RedisKey => $"user:{GetSessionUsername()}";
+
+	private int GetConfiguredMinimumBatteryPercentage() =>
+		Math.Clamp(currentSettings?.minBattery ?? currentSettings?.minBatteryJ ?? 20, 1, 100);
+
+	private static TimeOnly GetConfiguredAlarmTime(UserSettings? settings)
+	{
+		var configuredTime = settings?.bedtime ?? settings?.bedtimeJ;
+		return configuredTime ?? new TimeOnly(22, 0);
+	}
 
 	private string GetSessionUsername() =>
 		string.IsNullOrWhiteSpace(_userSessions.Username) ? GuestUsername : _userSessions.Username;

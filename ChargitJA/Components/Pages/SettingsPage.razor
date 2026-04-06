@@ -14,20 +14,20 @@ Save Settings
 
 @code {
 
-	private int minBattery;
-	private TimeOnly? bedtime;
+ private int minBattery = 20;
+	private TimeOnly bedtime = new(22, 0);
 
 	// Format inputs, to make a json
 
-	public class Settings {
-		public int minBatteryJ { get; set; }
-		public TimeOnly? bedtimeJ { get; set; }
-	};
+ public class Settings {
+		public int minBattery { get; set; }
+		public TimeOnly bedtime { get; set; }
+	}
 
 	private void SaveSettings() {
 		var settings = new Settings {
-			minBatteryJ = minBattery,
-			bedtimeJ = bedtime
+           minBattery = minBattery,
+			bedtime = bedtime
 		};
 		var json = System.Text.Json.JsonSerializer.Serialize(settings);
 		string targetFile = Path.Combine(FileSystem.AppDataDirectory, "settings.json");
