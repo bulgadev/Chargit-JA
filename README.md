@@ -56,6 +56,7 @@ Chargit-JA runs continuously in the background and does three things:
 `AuthService` reads authentication settings from **environment variables first**, then from a bundled `.env` file (placed at the repo root as `ChargitJA/.env`; it is included in the MAUI bundle as `env.config` via the project's `<MauiAsset>` entry).
 
 ```dotenv
+# Note: the key is named AUTO_ENDPOINT in the source — likely a typo for AUTH_ENDPOINT (see §5)
 AUTO_ENDPOINT=https://<your-zitadel-domain>/oauth/v2/authorize
 TOKEN_ENDPOINT=https://<your-zitadel-domain>/oauth/v2/token
 USERINFO_ENDPOINT=https://<your-zitadel-domain>/oidc/v1/userinfo
@@ -153,7 +154,7 @@ App launch
 Every minute (Timer tick):
   CheckAndTriggerAlarm()
     ├─ calls UpdateBatteryInfo() → refreshes BatteryLevel/BatteryStatus
-    ├─ if DateTime.Now != 22:0x → return (skip)
+    ├─ if DateTime.Now != 22:00 → return (skip)
     ├─ if already fired today (_lastAlarmDate) → return (skip)
     ├─ if battery >= 80% → return (skip — you're fine)
     └─ AlarmInterface.SetAlarm(22:00, "Your {device} is not charging!")
@@ -165,7 +166,7 @@ On every battery change (BatteryInfoChanged event):
     ├─ updates BatteryLevel and BatteryStatus properties (fires PropertyChanged → UI refresh)
     ├─ if percentage dropped (or first run) → PushBatteryToRedis()
     │    └─ EnsureUserDocumentExists(): JSON.SET "user:{username}" NX
-    │         { user_info, devices:[], settings:{theme:"dark", notifications:true} }
+    │         { "user_info": {...}, "devices": [], "settings": {"theme": "dark", "notifications": true} }
     │    └─ JSON.GET / JSON.ARRAPPEND / JSON.SET on $.devices[?(@.id=='{deviceId}')]
     └─ LoadDevicesFromRedis()
          └─ JSON.GET "user:{username}" $.devices → deserialises into IReadOnlyList<UserDevice>
